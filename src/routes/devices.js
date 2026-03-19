@@ -1,36 +1,21 @@
 'use strict'
-
-const deviceService    = require('../services/deviceService')
-const { verifyJWT }    = require('../middlewares/auth')
+const deviceService = require('../services/deviceService')
+const { verifyJWT } = require('../middlewares/auth')
 
 async function deviceRoutes(fastify) {
 
-  // POST /api/devices/register — App Android (sans auth)
-  fastify.post('/api/devices/register', {
-    schema: {
-      body: {
-        type: 'object',
-        required: ['deviceId', 'platform'],
-        properties: {
-          deviceId:    { type: 'string' },
-          fingerprint: { type: 'string' },
-          platform:    { type: 'string', enum: ['android_tv', 'android_mobile'] },
-          appVersion:  { type: 'string' }
-        }
-      }
-    }
-  }, async (req, reply) => {
+  fastify.post('/api/devices/register', async (req, reply) => {
     try {
-      const { deviceId, fingerprint, platform, appVersion } = req.body
-      const result = await deviceService.registerDevice(deviceId, fingerprint, platform, appVersion)
+      const { deviceId, fingerprint, platform, appVersion } = req.body || {}
+      const dId  = deviceId || require('crypto').randomBytes(16).toString('hex')
+      const plat = platform || 'android_tv'
+      const result = await deviceService.registerDevice(dId, fingerprint, plat, appVersion)
       return reply.status(201).send(result)
     } catch (err) {
-      const code = err.statusCode || 500
-      return reply.status(code).send({ error: err.message })
+      return reply.status(err.statusCode || 500).send({ error: err.message })
     }
   })
 
-  // POST /api/devices/activate — Portail web (avec auth JWT)
   fastify.post('/api/devices/activate', {
     preHandler: verifyJWT,
     schema: {
@@ -44,38 +29,32 @@ async function deviceRoutes(fastify) {
     }
   }, async (req, reply) => {
     try {
-      const userId = req.user.sub
-      const { code } = req.body
-      const result = await deviceService.activateDevice(userId, code)
+      const result = await deviceService.activateDevice(req.user.sub, req.body.code)
       return reply.send(result)
     } catch (err) {
-      const code = err.statusCode || 500
-      return reply.status(code).send({ error: err.message })
+      return reply.status(err.statusCode || 500).send({ error: err.message })
     }
   })
 
-  // POST /api/devices/auth — App Android (sans auth JWT)
-  fastify.post('/api/devices/auth', {
-    schema: {
-      body: {
-        type: 'object',
-        required: ['deviceId', 'deviceKey'],
-        properties: {
-          deviceId:   { type: 'string' },
-          deviceKey:  { type: 'string' },
-          platform:   { type: 'string' },
-          appVersion: { type: 'string' }
-        }
-      }
-    }
-  }, async (req, reply) => {
+  fastify.post('/api/devices/check', async (req, reply) => {
     try {
-      const { deviceId, deviceKey } = req.body
-      const result = await deviceService.authenticateDevice(deviceId, deviceKey)
+      const { code } = req.body || {}
+      if (!code) return reply.status(400).send({ error: 'code required' })
+      const result = await deviceService.checkActivation(code)
       return reply.send(result)
     } catch (err) {
-      const code = err.statusCode || 500
-      return reply.status(code).send({ error: err.message })
+      return reply.status(err.statusCode || 500).send({ error: err.message })
+    }
+  })
+
+  fastify.post('/api/devices/auth', async (req, reply) => {
+    try {
+      const { deviceId, deviceKey } = req.body || {}
+      if (!deviceKey) return reply.status(400).send({ error: 'deviceKey required' })
+      const result = await deviceService.authenticateDevice(deviceId || 'unknown', deviceKey)
+      return reply.send(result)
+    } catch (err) {
+      return reply.status(err.statusCode || 500).send({ error: err.message })
     }
   })
 }
